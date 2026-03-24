@@ -1,34 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, CartesianGrid, Legend } from "recharts";
 
-// ─── SUPABASE ─────────────────────────────────────────────────────────────────
-const SUPA_URL = "https://prpkwdwyptnwhisetuus.supabase.co";
-const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBycGt3ZHd5cHRud2hpc2V0dXVzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzQyNjM2MjIsImV4cCI6MjA4OTgzOTYyMn0.BmSoAoghp6XbYKYEs5Yv5yOUJa4Q-BkcrA8SFx3kb2E";
-
-const supa = {
-  headers: { "apikey": SUPA_KEY, "Authorization": `Bearer ${SUPA_KEY}`, "Content-Type": "application/json", "Prefer": "return=minimal" },
-  async get(table) {
-    try {
-      const r = await fetch(`${SUPA_URL}/rest/v1/${table}?select=*`, { headers: this.headers });
-      return await r.json();
-    } catch { return []; }
-  },
-  async upsert(table, id, data) {
-    try {
-      await fetch(`${SUPA_URL}/rest/v1/${table}`, {
-        method: "POST",
-        headers: { ...this.headers, "Prefer": "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({ id, data, updated_at: new Date().toISOString() })
-      });
-    } catch {}
-  },
-  async remove(table, id) {
-    try {
-      await fetch(`${SUPA_URL}/rest/v1/${table}?id=eq.${id}`, { method: "DELETE", headers: this.headers });
-    } catch {}
-  }
-};
-
 // ─── BRAND ────────────────────────────────────────────────────────────────────
 const B = {
   navy:"#1a2744", navyLight:"#e8ecf4", gold:"#a89060", goldLight:"#f5f0e8",
@@ -67,32 +39,21 @@ const GIDER_KDV = {"Yakıt":20,"Gıda":1,"Restoran/Kafe":10,"Ofis Malzeme":20,"U
 const SYM = {EUR:"€",USD:"$",TRY:"₺"};
 const TODAY = new Date().toISOString().split("T")[0];
 const MUK = {vkn:"7310813751",ad:"ERSİN POLAT",vd:"NİLÜFER",nace:"702202"};
-const SGK_AYLIK = Math.round(22104*0.325); // 2025 Bağ-Kur 4/b şahıs
-// 1 asgari ücretli çalışan işveren maliyeti (Aralık 2024'ten itibaren)
-const ISCI_BRUT_2025 = 26005.5; // brüt asgari ücret 2025
-const ISCI_SGK_ISVEREN = Math.round(ISCI_BRUT_2025 * 0.205); // %20.5 SGK işveren payı
-const ISCI_ISSIZLIK = Math.round(ISCI_BRUT_2025 * 0.02);    // %2 işsizlik işveren
-const ISCI_TOPLAM_AYLIK = Math.round(ISCI_BRUT_2025 + ISCI_SGK_ISVEREN + ISCI_ISSIZLIK); // ~31,856 TL
-const ISCI_BASLANGIC = "2024-12"; // Aralık 2024'ten itibaren
+const SGK_AYLIK = Math.round(22104*0.325); // 2025 Bağ-Kur 4/b
 
-// 2026 Gelir Vergisi Dilimleri
-const gelirVergisi = m => {
-  if(m<=0) return 0;
-  // 2026 tarifesi
-  const d=[[190000,.15],[400000,.20],[1500000,.27],[5300000,.35],[Infinity,.40]];
-  let v=0,p=0;
-  for(const [l,r] of d){ v+=(Math.min(m,l)-p)*r; p=l; if(m<=l) break; }
-  return v;
-};
-// Damga Vergisi: Bordro × %0.759 (2025)
-const damgaVergisi = brut => Math.round(brut * 0.00759);
-// Muhtasar (ücret stopajı): %15 ilk dilim
-const muhtasarVergisi = net => Math.round(net * 0.15);
+const fmtN = n => new Intl.NumberFormat("tr-TR").format(Math.round(n||0));
 const fmtD = d => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
 const daysSince = d => d ? Math.floor((new Date(TODAY)-new Date(d))/86400000) : 999;
 const getYil = d => d?.slice(0,4);
 const getAy  = d => d?.slice(0,7);
 const kdvRate = tarih => tarih >= "2023-07-10" ? 20 : 18;
+const gelirVergisi = m => {
+  if(m<=0) return 0;
+  const d=[[158000,.15],[330000,.20],[800000,.27],[4300000,.35],[Infinity,.40]];
+  let v=0,p=0;
+  for(const [l,r] of d){ v+=(Math.min(m,l)-p)*r; p=l; if(m<=l) break; }
+  return v;
+};
 
 // ─── INITIAL DATA ─────────────────────────────────────────────────────────────
 const PROPS0 = [
@@ -218,33 +179,11 @@ const INVOICES0 = [
   {id:"f18",firma:"Gecem Aydınlatma",tarih:"2025-04-01",tutarKdvHaric:5000,currency:"TRY",kdvOrani:20,service:"YODA",faturaNotu:""},
 ];
 
-// ─── STORAGE — Supabase önce, localStorage fallback ──────────────────────────
+// ─── UTILS ────────────────────────────────────────────────────────────────────
 const ls = {
   get: k => { try { const v = typeof window!=="undefined" ? localStorage.getItem(k) : null; return v ? JSON.parse(v) : null; } catch { return null; } },
   set: (k,v) => { try { if(typeof window!=="undefined") localStorage.setItem(k, JSON.stringify(v)); } catch {} },
 };
-
-// Supabase'den tüm veriyi çek — her tablo tek satır (id="main")
-async function loadFromSupabase() {
-  try {
-    const [p, t, inv, exp, a] = await Promise.all([
-      supa.get("proposals"), supa.get("tasks"),
-      supa.get("invoices"), supa.get("expenses"), supa.get("assignees")
-    ]);
-    const parse = (rows, key) => { const r = rows?.find(x=>x.id===key); return r?.data || null; };
-    return {
-      proposals: parse(p, "main"),
-      tasks:     parse(t, "main"),
-      invoices:  parse(inv, "main"),
-      expenses:  parse(exp, "main"),
-      assignees: parse(a, "main"),
-    };
-  } catch { return {}; }
-}
-
-async function saveToSupabase(table, data) {
-  await supa.upsert(table, "main", data);
-}
 const dlCSV = (rows, fn) => {
   const k = Object.keys(rows[0]);
   const csv = [k.join(";"), ...rows.map(r=>k.map(x=>`"${String(r[x]||"").replace(/"/g,'""')}"`).join(";"))].join("\n");
@@ -325,23 +264,8 @@ export default function App() {
   const [newExp, setNewExp]         = useState({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20});
   const [scanningExp, setScanningExp] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [taskModal, setTaskModal] = useState(null);
-  const [taskModalNote, setTaskModalNote] = useState("");
-  const [scanningInv, setScanningInv] = useState(false);
-  const [newDurumLabel, setNewDurumLabel] = useState("");
-  const [newHizmetLabel, setNewHizmetLabel] = useState("");
-  // Dynamic statuses/services stored in localStorage
-  const [customStatuses, setCustomStatusesS] = useState(()=> ls.get("v12:statuses") || null);
-  const [customServices, setCustomServicesS] = useState(()=> ls.get("v12:services") || null);
-  const setCustomStatuses = u=>{ setCustomStatusesS(u); ls.set("v12:statuses",u); };
-  const setCustomServices = u=>{ setCustomServicesS(u); ls.set("v12:services",u); };
-  // Active statuses = custom or defaults
-  const activeStatuses = customStatuses || Object.keys(DURUM_CFG);
-  const activeServices = customServices || SERVICES;
   const fileRef = useRef();
   const taskXlsRef = useRef();
-  const invFileRef = useRef();
 
   // ── DERIVED (colour map for assignees)
   const AC = useMemo(()=>{
@@ -352,33 +276,29 @@ export default function App() {
   const isAdmin = ADMIN_USERS.includes(currentUser);
 
   // ── PERSIST HELPERS
-  const setProposals = useCallback(u=>{ setProposalsS(u); ls.set("v11:p",u); saveToSupabase("proposals",u); },[]);
-  const setTasks     = useCallback(u=>{ setTasksS(u);     ls.set("v11:t",u); saveToSupabase("tasks",u); },[]);
-  const setInvoices  = useCallback(u=>{ setInvoicesS(u);  ls.set("v11:inv",u); saveToSupabase("invoices",u); },[]);
-  const setExpenses  = useCallback(u=>{ setExpensesS(u);  ls.set("v11:exp",u); saveToSupabase("expenses",u); },[]);
-  const setAssignees = useCallback(u=>{ setAssigneesS(u); ls.set("v11:a",u); saveToSupabase("assignees",u); },[]);
+  const setProposals = useCallback(u=>{ setProposalsS(u); ls.set("v11:p",u); },[]);
+  const setTasks     = useCallback(u=>{ setTasksS(u);     ls.set("v11:t",u); },[]);
+  const setInvoices  = useCallback(u=>{ setInvoicesS(u);  ls.set("v11:inv",u); },[]);
+  const setExpenses  = useCallback(u=>{ setExpensesS(u);  ls.set("v11:exp",u); },[]);
+  const setAssignees = useCallback(u=>{ setAssigneesS(u); ls.set("v11:a",u); },[]);
   const toast_       = useCallback(m=>{ setToast(m); setTimeout(()=>setToast(null),3000); },[]);
 
   // ── INIT
   useEffect(()=>{
-    (async()=>{
-      // Supabase'den yükle, yoksa localStorage'dan, yoksa default data
-      const sb = await loadFromSupabase();
-      const p   = sb.proposals || ls.get("v11:p");
-      const t   = sb.tasks     || ls.get("v11:t");
-      const a   = sb.assignees || ls.get("v11:a");
-      const inv = sb.invoices  || ls.get("v11:inv");
-      const exp = sb.expenses  || ls.get("v11:exp");
-      if(p) setProposalsS(p); else setProposalsS(PROPS0);
-      if(t) setTasksS(t);     else setTasksS(TASKS0);
-      if(a) setAssigneesS(a);
-      if(inv) setInvoicesS(inv); else setInvoicesS(INVOICES0);
-      if(exp) setExpensesS(exp);
-      const u = ls.get("v11:user");
-      if(u) setCurrentUser(u);
-      setLoaded(true);
-      fetchFX();
-    })();
+    const p  = ls.get("v11:p");
+    const t  = ls.get("v11:t");
+    const a  = ls.get("v11:a");
+    const inv= ls.get("v11:inv");
+    const exp= ls.get("v11:exp");
+    if(p) setProposalsS(p); else setProposalsS(PROPS0);
+    if(t) setTasksS(t);     else setTasksS(TASKS0);
+    if(a) setAssigneesS(a);
+    if(inv) setInvoicesS(inv); else setInvoicesS(INVOICES0);
+    if(exp) setExpensesS(exp);
+    const u = ls.get("v11:user");
+    if(u) setCurrentUser(u);
+    setLoaded(true);
+    fetchFX();
   // eslint-disable-next-line
   },[]);
 
@@ -456,19 +376,7 @@ export default function App() {
   const tahmGV   = useMemo(()=>gelirVergisi(vergiMat),[vergiMat]);
   const sgkAylar = useMemo(()=>maliAllYears?12:Math.min(12,Math.max(1,Math.ceil((new Date(TODAY)-new Date(`${maliYil}-01-01`))/86400000/30.44))),[maliYil,maliAllYears]);
   const sgkYillik= useMemo(()=>sgkAylar*SGK_AYLIK,[sgkAylar]);
-  // 1 çalışan SGK işveren payı (Aralık 2024'ten itibaren = tüm yıl için 12 ay)
-  const isciSgkYillik = useMemo(()=>{
-    if(maliAllYears) return ISCI_TOPLAM_AYLIK*12;
-    const yil=parseInt(maliYil);
-    if(yil<2024) return 0;
-    if(yil===2024) return ISCI_TOPLAM_AYLIK*1; // sadece Aralık
-    return ISCI_TOPLAM_AYLIK*12;
-  },[maliYil,maliAllYears]);
-  // Muhtasar (ücret stopajı işçiden kesilir ama işverenin beyanı)
-  const muhtasarYillik = useMemo(()=>Math.round(ISCI_BRUT_2025*0.15)*sgkAylar,[sgkAylar]);
-  // Damga vergisi bordrodan: brüt × %0.759
-  const damgaYillik = useMemo(()=>damgaVergisi(ISCI_BRUT_2025)*sgkAylar,[sgkAylar]);
-  const toplamYuk= useMemo(()=>tahmGV+netKdv+sgkYillik+isciSgkYillik,[tahmGV,netKdv,sgkYillik,isciSgkYillik]);
+  const toplamYuk= useMemo(()=>tahmGV+netKdv+sgkYillik,[tahmGV,netKdv,sgkYillik]);
   const netKalan = useMemo(()=>Math.max(0,invTRY-toplamYuk),[invTRY,toplamYuk]);
 
   const aylikChart = useMemo(()=>{
@@ -623,34 +531,6 @@ export default function App() {
     reader.readAsText(file, "UTF-8");
   },[tasks,setTasks,assignees,currentUser,isAdmin,toast_]);
 
-  const [syncing, setSyncing] = useState(false);
-
-  // Görev tamamlama (modal ile)
-  const completeTaskWithNote = useCallback((id, note)=>{
-    setTasks(tasks.map(t=>t.id===id?{...t,done:true,completionNote:note||"",completedAt:TODAY}:t));
-    setTaskModal(null); setTaskModalNote("");
-    toast_("✅ Görev tamamlandı");
-  },[tasks,setTasks,toast_]);
-
-  // AI scan gelir faturası
-  const scanGelirFatura = useCallback(async(file)=>{
-    setScanningInv(true);
-    try {
-      const b64=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:[
-        {type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:b64}},
-        {type:"text",text:`Bu faturayı analiz et. Sadece JSON döndür: {"firma":"müşteri adı","tarih":"YYYY-MM-DD","tutarKdvHaric":sayı,"currency":"TRY|EUR|USD","kdvOrani":sayı,"faturaNotu":""}. KDV bulamazsan 20 yaz. Tarih bulamazsan: ${TODAY}`}
-      ]}]})});
-      const data=await resp.json();
-      const text=data.content?.[0]?.text||"";
-      const parsed=JSON.parse(text.replace(/```json|```/g,"").trim());
-      setNewInv(prev=>({...prev,...parsed,tutarKdvHaric:String(parsed.tutarKdvHaric||"")}));
-      setAddInvOpen(true);
-      toast_("🤖 Fatura okundu! Kontrol et ve kaydet.");
-    }catch{ toast_("⚠️ Okunamadı, manuel gir."); }
-    setScanningInv(false);
-  },[toast_]);
-
   // ── LOADING
   if(!loaded) return <div style={{background:B.bg,height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:B.muted,fontFamily:"system-ui"}}>Yükleniyor...</div>;
 
@@ -716,7 +596,7 @@ export default function App() {
           </div>
           <div>
             <div style={{fontFamily:"'Cormorant Garamond',Georgia,serif",fontWeight:700,fontSize:20,color:B.navy,letterSpacing:"0.08em",lineHeight:1}}>SENSEİ</div>
-            <div style={{fontSize:8,color:B.gold,letterSpacing:"0.12em",textTransform:"uppercase",lineHeight:1,marginTop:1}}>Var Olan "Öz"dedir</div>
+            <div style={{fontSize:9,color:B.gold,letterSpacing:"0.18em",textTransform:"uppercase",lineHeight:1,marginTop:1}}>Danışmanlık</div>
           </div>
         </div>
         <div style={{width:1,height:32,background:B.border,flexShrink:0}}/>
@@ -730,14 +610,9 @@ export default function App() {
             <button onClick={()=>{ setCurrentUser(null); ls.set("v11:user",null); }} style={{background:"#ffffff30",border:"none",color:"#fff",borderRadius:8,padding:"1px 6px",fontSize:10,cursor:"pointer",fontFamily:"inherit"}}>çıkış</button>
           </div>
           {(acilTasks.length>0||stale.length>0)&&<div style={{background:B.redLight,color:B.red,border:`1px solid ${B.red}30`,borderRadius:20,padding:"4px 10px",fontSize:12,fontWeight:700}}>⚡ {acilTasks.length+stale.length}</div>}
-          <div style={{display:"flex",alignItems:"center",gap:4,fontSize:11,color:syncing?B.amber:B.green,fontWeight:700}}>
-            <div style={{width:7,height:7,borderRadius:"50%",background:syncing?B.amber:B.green}}/>
-            {syncing?"Kaydediliyor...":"Senkron ✓"}
-          </div>
           {/* Export dropdown */}
           <div style={{position:"relative"}}>
             <Btn sm outline color={B.navy} onClick={()=>setExportOpen(v=>!v)}>⬇️ Export</Btn>
-          <Btn sm outline color={B.muted} onClick={()=>setSettingsOpen(true)}>⚙️</Btn>
             {exportOpen&&(
               <div style={{position:"absolute",top:38,right:0,background:"#fff",border:`1px solid ${B.border}`,borderRadius:12,padding:8,minWidth:230,zIndex:300,boxShadow:`0 8px 32px ${B.navy}18`}}>
                 {[
@@ -1145,7 +1020,7 @@ export default function App() {
             return <Card key={cat} style={{minWidth:220,flex:1,padding:14,borderTop:`3px solid ${cc}`}}>
               <div style={{fontSize:11,fontWeight:800,color:cc,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>{cat} ({items.length})</div>
               {items.map(t=><div key={t.id} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"7px 0",borderBottom:`1px solid ${B.border}`,opacity:fadingTasks[t.id]?0:1,transition:"opacity 0.6s",background:fadingTasks[t.id]?B.greenLight+"50":"transparent"}}>
-                <input type="checkbox" checked={false} onChange={()=>{ setTaskModal(t); setTaskModalNote(""); }} style={{marginTop:2,accentColor:cc,flexShrink:0,width:14,height:14,cursor:"pointer"}}/>
+                <input type="checkbox" checked={false} onChange={()=>togTask(t.id)} style={{marginTop:2,accentColor:cc,flexShrink:0,width:14,height:14}}/>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{fontSize:12,lineHeight:1.4,textDecoration:fadingTasks[t.id]?"line-through":"none",fontWeight:600}}>{t.text}</div>
                   {t.konu&&<div style={{fontSize:11,color:B.muted,marginTop:1}}>📌 {t.konu}</div>}
@@ -1158,7 +1033,7 @@ export default function App() {
                     <Chip label={t.assignee.split(" ")[0]} color={AC[t.assignee]||B.muted} sm/>
                   </div>
                 </div>
-                <button style={{background:"transparent",border:"none",color:B.dim,cursor:"pointer",fontSize:16,flexShrink:0,padding:0,lineHeight:1}} onClick={()=>delTask(t.id)} title="Sil">×</button>
+                <button style={{background:"transparent",border:"none",color:B.dim,cursor:"pointer",fontSize:16,flexShrink:0,padding:0,lineHeight:1}} onClick={()=>delTask(t.id)}>×</button>
               </div>)}
             </Card>;
           })}
@@ -1195,11 +1070,7 @@ export default function App() {
             <KpiCard l="Gelir (KDV hariç)" v={"₺"+fmtN(invTRY)} sub={`€${fmtN(invTRY/(fx.EUR||50.82))} · $${fmtN(invTRY/(fx.USD||44.25))}`} c={B.navy}/>
             <KpiCard l="Tahsil Edilen KDV" v={"₺"+fmtN(invKdv)} sub={`€${fmtN(invKdv/(fx.EUR||50.82))}`} c={B.amber}/>
             <KpiCard l="Toplam (KDV dahil)" v={"₺"+fmtN(invTRY+invKdv)} sub={`${invYear.length} fatura`} c={B.green}/>
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              <Btn onClick={()=>setAddInvOpen(true)}>+ Fatura Ekle</Btn>
-              <input ref={invFileRef} type="file" accept="image/*,.pdf" style={{display:"none"}} onChange={e=>{ if(e.target.files[0]){ scanGelirFatura(e.target.files[0]); e.target.value=""; } }}/>
-              <Btn color={B.gold} outline sm onClick={()=>invFileRef.current?.click()}>{scanningInv?"⏳ Okunuyor...":"📷 Fatura Tara (AI)"}</Btn>
-            </div>
+            <Btn onClick={()=>setAddInvOpen(true)}>+ Fatura Ekle</Btn>
           </div>
           <div style={{background:B.navyLight,borderRadius:10,padding:"8px 14px",marginBottom:12,fontSize:11,color:B.navy}}>
             💡 EUR/USD faturalar o günkü TCMB kuruyla TRY'ye çevrilir. ✓ = gerçek kur, ~ = güncel kur kullanıldı.
@@ -1312,18 +1183,17 @@ export default function App() {
             <KpiCard l="Vergi Matrahı" v={"₺"+fmtN(vergiMat)} sub={`€${fmtN(vergiMat/(fx.EUR||50.82))}`} c={B.navy}/>
             <KpiCard l="Gelir Vergisi" v={"₺"+fmtN(tahmGV)} sub={`€${fmtN(tahmGV/(fx.EUR||50.82))} · $${fmtN(tahmGV/(fx.USD||44.25))}`} c={B.red}/>
             <KpiCard l="Net KDV" v={"₺"+fmtN(netKdv)} sub={`€${fmtN(netKdv/(fx.EUR||50.82))} · $${fmtN(netKdv/(fx.USD||44.25))}`} c={B.amber}/>
-            <KpiCard l="SGK Bağ-Kur (4/b)" v={"₺"+fmtN(sgkYillik)} sub={`${sgkAylar} ay × ₺${fmtN(SGK_AYLIK)}`} c={B.purple}/>
-            <KpiCard l="İşçi SGK+İşsizlik" v={"₺"+fmtN(isciSgkYillik)} sub={`1 çalışan · ₺${fmtN(ISCI_TOPLAM_AYLIK)}/ay`} c={B.purple}/>
+            <KpiCard l="SGK Bağ-Kur" v={"₺"+fmtN(sgkYillik)} sub={`${sgkAylar} ay × ₺${fmtN(SGK_AYLIK)}`} c={B.purple}/>
           </div>
           <div style={{display:"flex",gap:12,flexWrap:"wrap"}}>
             <Card style={{flex:1,minWidth:260,borderTop:`4px solid ${B.red}`}}>
               <div style={{fontWeight:800,color:B.navy,marginBottom:14,fontSize:13}}>💸 Toplam Yük & Net Kalan</div>
-              {[["Gelir Vergisi (2026)",tahmGV,B.navy],["Net KDV",netKdv,B.amber],["SGK Bağ-Kur 4/b",sgkYillik,B.purple],["İşçi SGK İşveren Payı",isciSgkYillik,B.purple],["Muhtasar (ücret stopajı)",muhtasarYillik,B.red],["Damga Vergisi (bordro)",damgaYillik,B.muted],["","",""],["TOPLAM YÜK",toplamYuk,B.red],["NET KALAN",netKalan,B.green]].map(([l,v,c],i)=>(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:i<7?`1px solid ${B.border}`:"none"}}>
-                  <span style={{fontSize:12,fontWeight:[7,8].includes(i)?800:400,color:!l?B.dim:B.text}}>{l||"─────────"}</span>
+              {[["Gelir Vergisi",tahmGV,B.navy],["Net KDV",netKdv,B.amber],["SGK Bağ-Kur (4/b)",sgkYillik,B.purple],["","",""],["TOPLAM YÜK",toplamYuk,B.red],["NET KALAN",netKalan,B.green]].map(([l,v,c],i)=>(
+                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:i<5?`1px solid ${B.border}`:"none"}}>
+                  <span style={{fontSize:13,fontWeight:[4,5].includes(i)?800:400,color:!l?B.dim:B.text}}>{l||"─────────"}</span>
                   {v&&<div style={{textAlign:"right"}}>
-                    <div style={{fontSize:12,fontWeight:700,color:c}}>₺{fmtN(v)}</div>
-                    <div style={{fontSize:9,color:B.dim}}>€{fmtN(v/(fx.EUR||50.82))} · ${fmtN(v/(fx.USD||44.25))}</div>
+                    <div style={{fontSize:13,fontWeight:700,color:c}}>₺{fmtN(v)}</div>
+                    <div style={{fontSize:10,color:B.dim}}>€{fmtN(v/(fx.EUR||50.82))} · ${fmtN(v/(fx.USD||44.25))}</div>
                   </div>}
                 </div>
               ))}
@@ -1349,7 +1219,7 @@ export default function App() {
             </Card>
           </div>
           <div style={{background:B.amberLight,borderRadius:10,padding:"10px 16px",border:`1px solid ${B.gold}40`,fontSize:12,color:B.amber,marginTop:14}}>
-            ⚠️ <b>Tahmini hesaplamadır.</b> Kesin beyan için mali müşavirinize danışın. · 2026 Gelir Vergisi Tarifesi uygulanmaktadır. · 1 asgari ücretli çalışan işveren maliyeti: ₺{fmtN(ISCI_TOPLAM_AYLIK)}/ay (brüt + SGK + işsizlik). Muhtasar ve damga vergisi çalışan maaşı üzerinden hesaplanır.
+            ⚠️ <b>Tahmini hesaplamadır.</b> Kesin beyan için mali müşavirinize danışın.
           </div>
         </div>}
 
@@ -1398,68 +1268,6 @@ export default function App() {
       </div>}
 
       </div>{/* end main container */}
-
-      {/* ── GÖREV TAMAMLAMA MODAL */}
-      {taskModal&&<div style={{position:"fixed",inset:0,background:"#1a274460",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300}} onClick={e=>e.target===e.currentTarget&&setTaskModal(null)}>
-        <Card style={{width:"90%",maxWidth:420,padding:24}}>
-          <div style={{fontWeight:800,fontSize:15,color:B.navy,marginBottom:4}}>✅ Görevi Tamamla</div>
-          <div style={{fontSize:13,color:B.muted,marginBottom:14,background:B.navyLight,borderRadius:8,padding:"8px 12px"}}>{taskModal.text}</div>
-          {taskModal.firma&&<div style={{fontSize:12,color:B.navy,marginBottom:8}}>🏢 {taskModal.firma} {taskModal.ilgiliKisi?`· 👤 ${taskModal.ilgiliKisi}`:""}</div>}
-          <Lbl c="Tamamlama Notu (opsiyonel)"/>
-          <input style={{...INP_S,width:"100%",marginBottom:14}} placeholder="Görüşme özeti, sonuç, takip notu..." value={taskModalNote} onChange={e=>setTaskModalNote(e.target.value)} onKeyDown={e=>e.key==="Enter"&&completeTaskWithNote(taskModal.id,taskModalNote)} autoFocus/>
-          <div style={{display:"flex",gap:8}}>
-            <Btn color={B.green} onClick={()=>completeTaskWithNote(taskModal.id,taskModalNote)}>✅ Tamamlandı</Btn>
-            <Btn outline color={B.muted} onClick={()=>setTaskModal(null)}>İptal</Btn>
-          </div>
-        </Card>
-      </div>}
-
-      {/* ── AYARLAR MODAL — Durum & Hizmet Yönetimi */}
-      {settingsOpen&&<div style={{position:"fixed",inset:0,background:"#1a274460",display:"flex",alignItems:"center",justifyContent:"center",zIndex:300}} onClick={e=>e.target===e.currentTarget&&setSettingsOpen(false)}>
-        <Card style={{width:"90%",maxWidth:520,padding:24,maxHeight:"85vh",overflow:"auto"}}>
-          <div style={{fontWeight:800,fontSize:16,color:B.navy,marginBottom:20}}>⚙️ Ayarlar — Durum & Hizmet Yönetimi</div>
-          
-          <div style={{marginBottom:20}}>
-            <Lbl c="Teklif Durumları"/>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-              {activeStatuses.map(d=>{ const cfg=DURUM_CFG[d]; return (
-                <div key={d} style={{display:"flex",alignItems:"center",gap:4,background:cfg?.bg||B.navyLight,borderRadius:20,padding:"3px 10px",border:`1px solid ${cfg?.border||B.border}`}}>
-                  <span style={{fontSize:12,fontWeight:700,color:cfg?.text||B.navy}}>{cfg?.label||d}</span>
-                  <button onClick={()=>setCustomStatuses(activeStatuses.filter(x=>x!==d))} style={{background:"transparent",border:"none",color:B.dim,cursor:"pointer",fontSize:14,lineHeight:1,padding:0}}>×</button>
-                </div>
-              );})}
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              <input style={{...INP_S,flex:1}} placeholder="Yeni durum adı (örn: müzakere)" value={newDurumLabel} onChange={e=>setNewDurumLabel(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"&&newDurumLabel.trim()){ setCustomStatuses([...activeStatuses,newDurumLabel.trim()]); setNewDurumLabel(""); } }}/>
-              <Btn sm onClick={()=>{ if(newDurumLabel.trim()){ setCustomStatuses([...activeStatuses,newDurumLabel.trim()]); setNewDurumLabel(""); } }}>+ Ekle</Btn>
-              <Btn sm outline color={B.muted} onClick={()=>setCustomStatuses(Object.keys(DURUM_CFG))}>Sıfırla</Btn>
-            </div>
-          </div>
-
-          <div style={{marginBottom:20}}>
-            <Lbl c="Hizmet Türleri"/>
-            <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
-              {activeServices.map(s=>{ const c=SVC_C[s]||SVC_C["Diğer"]; return (
-                <div key={s} style={{display:"flex",alignItems:"center",gap:4,background:c.bg,borderRadius:20,padding:"3px 10px",border:`1px solid ${c.dot}30`}}>
-                  <span style={{fontSize:11,fontWeight:700,color:c.text}}>{s}</span>
-                  <button onClick={()=>setCustomServices(activeServices.filter(x=>x!==s))} style={{background:"transparent",border:"none",color:B.dim,cursor:"pointer",fontSize:14,lineHeight:1,padding:0}}>×</button>
-                </div>
-              );})}
-            </div>
-            <div style={{display:"flex",gap:8}}>
-              <input style={{...INP_S,flex:1}} placeholder="Yeni hizmet (örn: ISO Danışmanlık)" value={newHizmetLabel} onChange={e=>setNewHizmetLabel(e.target.value)} onKeyDown={e=>{ if(e.key==="Enter"&&newHizmetLabel.trim()){ setCustomServices([...activeServices,newHizmetLabel.trim()]); setNewHizmetLabel(""); } }}/>
-              <Btn sm onClick={()=>{ if(newHizmetLabel.trim()){ setCustomServices([...activeServices,newHizmetLabel.trim()]); setNewHizmetLabel(""); } }}>+ Ekle</Btn>
-              <Btn sm outline color={B.muted} onClick={()=>setCustomServices(SERVICES)}>Sıfırla</Btn>
-            </div>
-          </div>
-
-          <div style={{background:B.navyLight,borderRadius:10,padding:"10px 14px",fontSize:12,color:B.navy,marginBottom:16}}>
-            ℹ️ Silinen durumlar mevcut tekliflerde görünmeye devam eder. Yeni eklenen durumlar tüm seçim listelerine eklenir.
-          </div>
-
-          <Btn outline color={B.muted} onClick={()=>setSettingsOpen(false)}>Kapat</Btn>
-        </Card>
-      </div>}
 
       {/* Toast */}
       {toast&&<div style={{position:"fixed",bottom:24,left:"50%",transform:"translateX(-50%)",background:B.navy,color:"#fff",borderRadius:10,padding:"10px 20px",fontSize:13,fontWeight:700,zIndex:9999,whiteSpace:"nowrap",boxShadow:"0 6px 24px #1a274440"}}>{toast}</div>}
