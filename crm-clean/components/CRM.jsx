@@ -93,13 +93,6 @@ const daysSince = d => d ? Math.floor((new Date(TODAY)-new Date(d))/86400000) : 
 const getYil = d => d?.slice(0,4);
 const getAy  = d => d?.slice(0,7);
 const kdvRate = tarih => tarih >= "2023-07-10" ? 20 : 18;
-const gelirVergisi = m => {
-  if(m<=0) return 0;
-  const d=[[158000,.15],[330000,.20],[800000,.27],[4300000,.35],[Infinity,.40]];
-  let v=0,p=0;
-  for(const [l,r] of d){ v+=(Math.min(m,l)-p)*r; p=l; if(m<=l) break; }
-  return v;
-};
 
 // ─── INITIAL DATA ─────────────────────────────────────────────────────────────
 const PROPS0 = [
