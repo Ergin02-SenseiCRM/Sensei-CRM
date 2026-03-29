@@ -417,6 +417,9 @@ export default function App() {
     const interval = setInterval(poll, 20000); // 20 saniye
     return ()=>clearInterval(interval);
   },[loaded]);
+
+  // Historical rates
+  useEffect(()=>{
     if(tab!=="mali") return;
     const pairs=[...new Set(invoices.filter(f=>f.currency!=="TRY").map(f=>`${f.tarih}_${f.currency}`))];
     pairs.forEach(async key=>{
