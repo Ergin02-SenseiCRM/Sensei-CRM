@@ -670,15 +670,6 @@ export default function App() {
     }
   },[pipeline,pipeTRY,winRate,kesilenInv,invTRY,expTotal,netKdv,tahmGV,toplamSGK,sgkBagKur,sgkIsverenYillik,netKalan,toplamYuk,damgaV,geciciV,calısanAylar,sgkAylar,fx,rateCache,toTRY,maliYil]);
 
-  // ── LOADING
-  if(!loaded) return <div style={{background:B.bg,height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:B.muted,fontFamily:"system-ui",flexDirection:"column",gap:12}}>
-    <div style={{width:40,height:40,background:B.navy,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center"}}>
-      <svg width={22} height={22} viewBox="0 0 24 24" fill="none"><path d="M5 12L10 17L19 7" stroke={B.gold} strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-    </div>
-    <div style={{fontWeight:700,color:B.navy}}>SENSEİ CRM yükleniyor...</div>
-  </div>;
-
-  // ── LOGIN
   const doLogin = useCallback((name, pass)=>{
     if(!name.trim()){ setLoginErr("Kullanıcı adı boş olamaz."); return; }
     const dogrSifre = KULLANICI_SIFRELER[name.trim()];
@@ -689,6 +680,15 @@ export default function App() {
     ls.set("v12:user",n);
   },[]);
 
+  // ── LOADING
+  if(!loaded) return <div style={{background:B.bg,height:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:B.muted,fontFamily:"system-ui",flexDirection:"column",gap:12}}>
+    <div style={{width:40,height:40,background:B.navy,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none"><path d="M5 12L10 17L19 7" stroke={B.gold} strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+    </div>
+    <div style={{fontWeight:700,color:B.navy}}>SENSEİ CRM yükleniyor...</div>
+  </div>;
+
+  // ── LOGIN
   if(!currentUser) return (
     <div style={{background:`linear-gradient(135deg,${B.navy} 0%,#2b4170 100%)`,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',system-ui,sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;700;800&display=swap');*{box-sizing:border-box}button:hover{opacity:.88}`}</style>
