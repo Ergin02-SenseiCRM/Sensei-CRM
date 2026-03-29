@@ -131,6 +131,25 @@ const dlCSV = (rows, fn) => {
   const csv=[k.join(";"),...rows.map(r=>k.map(x=>`"${String(r[x]||"").replace(/"/g,'""')}"`).join(";"))].join("\n");
   const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob(["\ufeff"+csv],{type:"text/csv;charset=utf-8;"})); a.download=fn; a.click();
 };
+
+// .ICS dosyası oluştur (Outlook/Google Takvim)
+const downloadICS = (task) => {
+  const now = new Date().toISOString().replace(/[-:]/g,"").slice(0,15)+"Z";
+  const hedef = task.hedefTarih ? task.hedefTarih.replace(/-/g,"") : new Date(Date.now()+86400000).toISOString().slice(0,10).replace(/-/g,"");
+  const ics = [
+    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//SENSEİ CRM//TR",
+    "BEGIN:VEVENT",
+    `UID:${task.id}@sensei-crm`,
+    `DTSTAMP:${now}`,
+    `DTSTART;VALUE=DATE:${hedef}`,
+    `DTEND;VALUE=DATE:${hedef}`,
+    `SUMMARY:${task.text}`,
+    `DESCRIPTION:${[task.konu,task.firma,task.ilgiliKisi,task.telefon].filter(Boolean).join(" | ")}`,
+    `ORGANIZER:CN=${task.assignee}`,
+    "END:VEVENT","END:VCALENDAR"
+  ].join("\r\n");
+  const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([ics],{type:"text/calendar"})); a.download=`gorev-${task.id}.ics`; a.click();
+};
 const printPDF = (htmlContent, title) => {
   const w=window.open("","_blank");
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${title}</title>
@@ -319,8 +338,9 @@ export default function App() {
   const [newTaskExtra, setNewTaskExtra] = useState({hedefTarih:"",telefon:"",firma:"",ilgiliKisi:"",konu:""});
   const [showTaskDetail, setShowTaskDetail] = useState(false);
   const [fadingTasks, setFadingTasks] = useState({});
-  const [taskAction, setTaskAction]   = useState(null); // {id, task}
+  const [taskAction, setTaskAction]   = useState(null);
   const [taskActionNote, setTaskActionNote] = useState("");
+  const [editingTask, setEditingTask] = useState(null); // {id, text, assignee, category}
   const [showAddAsn, setShowAddAsn]   = useState(false);
   const [newAsnName, setNewAsnName]   = useState("");
   // Mali
@@ -693,14 +713,11 @@ export default function App() {
     <div style={{background:`linear-gradient(135deg,${B.navy} 0%,#2b4170 100%)`,minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",fontFamily:"'DM Sans',system-ui,sans-serif"}}>
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=DM+Sans:wght@400;700;800&display=swap');*{box-sizing:border-box}button:hover{opacity:.88}`}</style>
       <div style={{background:"rgba(255,255,255,0.97)",borderRadius:20,padding:"44px 48px",maxWidth:400,width:"90%",textAlign:"center",boxShadow:"0 20px 60px #00000040"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"center",gap:12,marginBottom:8}}>
-          <div style={{width:44,height:44,background:B.navy,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <svg width={24} height={24} viewBox="0 0 24 24" fill="none"><path d="M5 12L10 17L19 7" stroke={B.gold} strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </div>
-          <div>
-            <div style={{fontFamily:"'Cormorant Garamond',Georgia,serif",fontWeight:700,fontSize:28,color:B.navy,letterSpacing:"0.08em",lineHeight:1}}>SENSEİ</div>
-            <div style={{fontSize:9,color:B.gold,letterSpacing:"0.2em",textTransform:"uppercase"}}>Danışmanlık</div>
-          </div>
+        <div style={{marginBottom:8}}>
+          <img src="/logo_sensei.jpg" alt="SENSEİ Danışmanlık"
+            style={{height:80,width:"auto",objectFit:"contain",maxWidth:"100%"}}
+            onError={e=>{e.target.style.display="none";}}
+          />
         </div>
         <div style={{fontSize:11,color:B.dim,marginBottom:24,fontStyle:"italic"}}>"Var Olan 'Öz'dedir"</div>
         {/* Kullanıcı seç */}
@@ -739,13 +756,20 @@ export default function App() {
 
       {/* HEADER */}
       <div style={{background:B.navy,padding:"0 20px",display:"flex",alignItems:"center",gap:16,height:54,position:"sticky",top:0,zIndex:50,boxShadow:`0 2px 12px ${B.navy}60`}}>
-        <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-          <div style={{width:32,height:32,background:B.gold,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <svg width={18} height={18} viewBox="0 0 24 24" fill="none"><path d="M5 12L10 17L19 7" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </div>
-          <div>
-            <div style={{fontFamily:"'Cormorant Garamond',Georgia,serif",fontWeight:700,fontSize:20,color:"#fff",letterSpacing:"0.08em",lineHeight:1}}>SENSEİ</div>
-            <div style={{fontSize:8,color:B.gold,letterSpacing:"0.2em",textTransform:"uppercase",lineHeight:1,marginTop:1}}>Danışmanlık</div>
+        {/* Logo */}
+        <div style={{display:"flex",alignItems:"center",flexShrink:0}}>
+          <img src="/logo_sensei.jpg" alt="SENSEİ Danışmanlık"
+            style={{height:38,width:"auto",objectFit:"contain",filter:"brightness(0) invert(1)"}}
+            onError={e=>{e.target.style.display="none"; e.target.nextSibling.style.display="flex";}}
+          />
+          <div style={{display:"none",alignItems:"center",gap:8}}>
+            <div style={{width:32,height:32,background:B.gold,borderRadius:8,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <svg width={18} height={18} viewBox="0 0 24 24" fill="none"><path d="M5 12L10 17L19 7" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </div>
+            <div>
+              <div style={{fontFamily:"'Cormorant Garamond',Georgia,serif",fontWeight:700,fontSize:20,color:"#fff",letterSpacing:"0.08em",lineHeight:1}}>SENSEİ</div>
+              <div style={{fontSize:8,color:B.gold,letterSpacing:"0.2em",textTransform:"uppercase",lineHeight:1,marginTop:1}}>Danışmanlık</div>
+            </div>
           </div>
         </div>
         <div style={{width:1,height:28,background:"#ffffff20",flexShrink:0}}/>
@@ -1183,7 +1207,6 @@ export default function App() {
               <div style={{fontSize:11,fontWeight:800,color:cc,textTransform:"uppercase",letterSpacing:"0.07em",marginBottom:10}}>{cat} ({items.length})</div>
               {items.map(t=>(
                 <div key={t.id} style={{display:"flex",gap:8,alignItems:"flex-start",padding:"7px 0",borderBottom:`1px solid ${B.border}`,opacity:fadingTasks[t.id]?0:1,transition:"opacity 0.6s",background:fadingTasks[t.id]?B.greenLight+"50":"transparent"}}>
-                  {/* Tik — mini aksiyon paneli açar */}
                   <input type="checkbox" checked={false} onChange={()=>setTaskAction({id:t.id,task:t})} style={{marginTop:2,accentColor:cc,flexShrink:0,width:14,height:14,cursor:"pointer"}}/>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{fontSize:12,lineHeight:1.4,fontWeight:600,textDecoration:fadingTasks[t.id]?"line-through":"none"}}>{t.text}</div>
@@ -1196,7 +1219,14 @@ export default function App() {
                       <Chip label={t.assignee.split(" ")[0]} color={AC[t.assignee]||B.muted} sm/>
                     </div>
                   </div>
-                  <button style={{background:"transparent",border:"none",color:B.dim,cursor:"pointer",fontSize:16,flexShrink:0,padding:0,lineHeight:1}} onClick={()=>delTask(t.id)}>×</button>
+                  <div style={{display:"flex",gap:4,flexShrink:0}}>
+                    {/* Takvime ekle */}
+                    {t.hedefTarih&&<button title="Outlook/Takvim'e ekle (.ics)" onClick={()=>downloadICS(t)} style={{background:"transparent",border:"none",color:B.muted,cursor:"pointer",fontSize:13,padding:0,lineHeight:1}}>📅</button>}
+                    {/* Düzenle */}
+                    <button title="Düzenle" onClick={()=>setEditingTask({...t})} style={{background:"transparent",border:"none",color:B.muted,cursor:"pointer",fontSize:13,padding:0,lineHeight:1}}>✏️</button>
+                    {/* Sil */}
+                    <button style={{background:"transparent",border:"none",color:B.dim,cursor:"pointer",fontSize:16,padding:0,lineHeight:1}} onClick={()=>delTask(t.id)}>×</button>
+                  </div>
                 </div>
               ))}
             </Card>;
@@ -1235,9 +1265,40 @@ export default function App() {
             <Btn outline color={B.muted} onClick={()=>{ setTaskAction(null); setTaskActionNote(""); }}>İptal</Btn>
           </div>
         </Modal>}
-      </div>}
-
-      {/* ══ MALİ ══ */}
+        {/* Görev Düzenleme Modal */}
+        {editingTask&&<Modal onClose={()=>setEditingTask(null)}>
+          <div style={{fontWeight:800,fontSize:15,color:B.navy,marginBottom:14}}>✏️ Görevi Düzenle</div>
+          <div style={{marginBottom:11}}><Lbl c="Görev Metni"/>
+            <input style={INP({width:"100%"})} value={editingTask.text} onChange={e=>setEditingTask(p=>({...p,text:e.target.value}))}/>
+          </div>
+          <div style={{display:"flex",gap:10,marginBottom:11}}>
+            <div style={{flex:1}}><Lbl c="Kategori"/>
+              <select style={SEL({width:"100%"})} value={editingTask.category} onChange={e=>setEditingTask(p=>({...p,category:e.target.value}))}>
+                {CATS.map(c=><option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div style={{flex:1}}><Lbl c="Atanan"/>
+              <select style={SEL({width:"100%"})} value={editingTask.assignee} onChange={e=>setEditingTask(p=>({...p,assignee:e.target.value}))}>
+                {(isAdmin?assignees:[currentUser]).map(a=><option key={a}>{a}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{display:"flex",gap:10,marginBottom:11}}>
+            <div style={{flex:1}}><Lbl c="Firma"/><input style={INP({width:"100%"})} value={editingTask.firma||""} onChange={e=>setEditingTask(p=>({...p,firma:e.target.value}))}/></div>
+            <div style={{flex:1}}><Lbl c="Hedef Tarih"/><input type="date" style={INP({width:"100%"})} value={editingTask.hedefTarih||""} onChange={e=>setEditingTask(p=>({...p,hedefTarih:e.target.value}))}/></div>
+          </div>
+          <div style={{display:"flex",gap:10,marginBottom:16}}>
+            <div style={{flex:1}}><Lbl c="İlgili Kişi"/><input style={INP({width:"100%"})} value={editingTask.ilgiliKisi||""} onChange={e=>setEditingTask(p=>({...p,ilgiliKisi:e.target.value}))}/></div>
+            <div style={{flex:1}}><Lbl c="Telefon"/><input style={INP({width:"100%"})} value={editingTask.telefon||""} onChange={e=>setEditingTask(p=>({...p,telefon:e.target.value}))}/></div>
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <Btn color={B.green} onClick={()=>{
+              setTasks(tasks.map(t=>t.id===editingTask.id?{...editingTask}:t));
+              setEditingTask(null); toast_("✅ Görev güncellendi");
+            }}>Kaydet</Btn>
+            <Btn outline color={B.muted} onClick={()=>setEditingTask(null)}>İptal</Btn>
+          </div>
+        </Modal>}
       {tab==="mali"&&<div>
         <div style={{display:"flex",gap:12,marginBottom:16,alignItems:"center",flexWrap:"wrap"}}>
           <div style={{fontWeight:800,color:B.navy,fontSize:15}}>💰 Mali Tablo</div>
