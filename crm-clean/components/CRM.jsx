@@ -31,6 +31,10 @@ async function loadSupa(){
 }
 async function saveSupa(table,data){ await sb.upsert(table,"main",data); }
 
+// ─── CLAUDE API KEY (Fiş AI tarama için) ─────────────────────────────────────
+// Kendi Anthropic API key'inizi buraya girin: https://console.anthropic.com
+const CLAUDE_API_KEY = ""; // örn: "sk-ant-api03-..."
+
 // ─── BRAND ────────────────────────────────────────────────────────────────────
 const B = {
   navy:"#1a2744", navyLight:"#e8ecf4", navyMid:"#2b4170",
@@ -178,7 +182,7 @@ const printPDF = (htmlContent, title) => {
   w.document.close(); setTimeout(()=>w.print(),800);
 };
 const fmtN = n => new Intl.NumberFormat("tr-TR").format(Math.round(n||0));
-const fmtD = d => d ? new Date(d).toLocaleDateString("tr-TR") : "—";
+const fmtD = d => { if(!d) return "—"; const p=d.split("-"); return p.length===3?`${p[2]}.${p[1]}.${p[0]}`:"—"; };
 const daysSince = d => d ? Math.floor((new Date(TODAY)-new Date(d))/86400000) : 999;
 const getYil = d => d?.slice(0,4);
 const getAy  = d => d?.slice(0,7);
@@ -349,7 +353,7 @@ export default function App() {
   const [addInvOpen, setAddInvOpen]   = useState(false);
   const [newInv, setNewInv]           = useState({firma:"",tarih:TODAY,tutarKdvHaric:"",currency:"TRY",kdvOrani:20,service:"DDX",faturaNotu:"",tip:"kesilen"});
   const [addExpOpen, setAddExpOpen]   = useState(false);
-  const [newExp, setNewExp]           = useState({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20});
+  const [newExp, setNewExp]           = useState({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20,tip:"fiş"});
   const [scanningExp, setScanningExp] = useState(false);
   const [exportOpen, setExportOpen]   = useState(false);
   const fileRef   = useRef();
@@ -579,35 +583,41 @@ export default function App() {
 
   const addAsn = useCallback(()=>{
     const n=newAsnName.trim(); if(!n||assignees.includes(n)) return;
-    setAssignees([...assignees.filter(a=>a!=="Diğer"),n,"Diğer"]);
+    const hasDiger=assignees.includes("Diğer");
+    const filtered=assignees.filter(a=>a!=="Diğer");
+    setAssignees([...filtered,n,...(hasDiger?["Diğer"]:[])]);
     setNewAsnName(""); setShowAddAsn(false); toast_(`✅ ${n} eklendi`);
   },[newAsnName,assignees,setAssignees,toast_]);
 
   const addInvoice = useCallback(()=>{
     if(!newInv.firma||!newInv.tutarKdvHaric) return;
-    setInvoices([{...newInv,id:"f"+Date.now(),tutarKdvHaric:parseFloat(newInv.tutarKdvHaric)||0,kdvOrani:kdvRate(newInv.tarih)},...invoices]);
+    const inv = {...newInv, id:"f"+Date.now(), tutarKdvHaric:parseFloat(newInv.tutarKdvHaric)||0, kdvOrani:parseInt(newInv.kdvOrani)||0, tarih:newInv.tarih||TODAY};
+    setInvoices([inv,...invoices]);
     setAddInvOpen(false); setNewInv({firma:"",tarih:TODAY,tutarKdvHaric:"",currency:"TRY",kdvOrani:20,service:"DDX",faturaNotu:"",tip:"kesilen"});
     toast_("✅ Fatura eklendi");
   },[newInv,invoices,setInvoices,toast_]);
 
   const addExpense = useCallback(()=>{
     if(!newExp.aciklama||!newExp.tutarKdvDahil) return;
-    setExpenses([{...newExp,id:"e"+Date.now(),tutarKdvDahil:parseFloat(newExp.tutarKdvDahil)||0},...expenses]);
-    setAddExpOpen(false); setNewExp({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20});
+    setExpenses([{...newExp,id:"e"+Date.now(),tutarKdvDahil:parseFloat(newExp.tutarKdvDahil)||0,tarih:newExp.tarih||TODAY},...expenses]);
+    setAddExpOpen(false); setNewExp({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20,tip:"fiş"});
     toast_("✅ Gider eklendi");
   },[newExp,expenses,setExpenses,toast_]);
 
   const scanReceipt = useCallback(async(file)=>{
+    if(!CLAUDE_API_KEY){ toast_("⚠️ CLAUDE_API_KEY tanımlı değil — manuel gir."); return; }
     setScanningExp(true);
     try{
       const b64=await new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result.split(",")[1]); r.onerror=rej; r.readAsDataURL(file); });
-      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:b64}},{type:"text",text:`Bu fiş/faturayı analiz et. Sadece JSON: {"tarih":"YYYY-MM-DD","aciklama":"açıklama","tutarKdvDahil":sayı,"kdvOrani":sayı,"kategori":"Yakıt|Gıda|Restoran/Kafe|Ofis Malzeme|Ulaşım|Konaklama|Telefon/İnternet|Kırtasiye|Reklam/Tanıtım|Diğer"}. Tarih yok: ${TODAY}. KDV yok: 20.`}]}]})});
+      const resp=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json","x-api-key":CLAUDE_API_KEY,"anthropic-version":"2023-06-01"},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:400,messages:[{role:"user",content:[{type:"image",source:{type:"base64",media_type:file.type||"image/jpeg",data:b64}},{type:"text",text:`Bu fiş/faturayı analiz et. Sadece JSON döndür, başka hiçbir şey yazma: {"tarih":"YYYY-MM-DD","aciklama":"kısa açıklama","tutarKdvDahil":sayı,"kdvOrani":sayı,"kategori":"Yakıt|Gıda|Restoran/Kafe|Ofis Malzeme|Ulaşım|Konaklama|Telefon/İnternet|Kırtasiye|Reklam/Tanıtım|Diğer"}. Tarih yoksa: ${TODAY}. KDV oranı: Yakıt=%20, Gıda=%1, Restoran=%10, Ulaşım=%10, diğerleri=%20.`}]}]})});
+      if(!resp.ok){ const err=await resp.json().catch(()=>({})); throw new Error(err?.error?.message||`HTTP ${resp.status}`); }
       const data=await resp.json();
       const text=data.content?.[0]?.text||"";
-      const parsed=JSON.parse(text.replace(/```json|```/g,"").trim());
-      setNewExp(prev=>({...prev,...parsed,tutarKdvDahil:String(parsed.tutarKdvDahil||"")}));
+      const clean=text.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      setNewExp(prev=>({...prev,...parsed,tutarKdvDahil:String(parsed.tutarKdvDahil||""),tip:prev.tip}));
       setAddExpOpen(true); toast_("🤖 Fiş okundu!");
-    }catch{ toast_("⚠️ Fiş okunamadı, manuel gir."); }
+    }catch(err){ toast_(`⚠️ Fiş okunamadı: ${err.message||"Hata"}. Manuel gir.`); }
     setScanningExp(false);
   },[toast_]);
 
@@ -896,7 +906,7 @@ export default function App() {
                     <div style={{fontWeight:800,color:c,fontSize:12,marginBottom:6,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                       <span>{a.split(" ")[0]} <span style={{fontWeight:400,color:B.muted,fontSize:11}}>({items.length})</span></span>
                       {/* Sadece Ergin silebilir, kendini silemesin */}
-                      {currentUser==="Ergin Polat"&&a!=="Ergin Polat"&&<button onClick={()=>{ if(confirm(`"${a}" kişisini silmek istiyor musunuz?`)){ setAssignees(assignees.filter(x=>x!==a)); toast_(`🗑️ ${a} silindi`); } }} style={{background:"transparent",border:"none",color:B.red,cursor:"pointer",fontSize:13,padding:0,lineHeight:1}} title="Kişiyi sil">×</button>}
+                      {isAdmin&&a!==currentUser&&a!=="Diğer"&&<button onClick={()=>{ if(window.confirm(`"${a}" kişisini silmek istiyor musunuz?\n(Bu kişiye atanmış görev ve teklifler etkilenmez.)`)){setAssignees(assignees.filter(x=>x!==a)); toast_(`🗑️ ${a} silindi`); } }} style={{background:"transparent",border:"none",color:B.red,cursor:"pointer",fontSize:13,padding:0,lineHeight:1}} title="Kişiyi sil">×</button>}
                     </div>
                     {items.slice(0,4).map(t=><div key={t.id} style={{fontSize:11,color:B.muted,padding:"2px 0",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>• {t.text}</div>)}
                     {items.length===0&&<div style={{fontSize:10,color:B.dim}}>Açık görev yok ✅</div>}
@@ -1383,9 +1393,10 @@ export default function App() {
             </div>
           </div>
           {expYear.length===0&&<div style={{background:B.goldLight,borderRadius:12,padding:32,textAlign:"center"}}>
-            <div style={{fontSize:32,marginBottom:8}}>📷</div>
+            <div style={{fontSize:32,marginBottom:8}}>🧾</div>
             <div style={{fontWeight:700,color:B.navy,marginBottom:4}}>Fiş ve adıma kesilen faturaları buraya ekle</div>
-            <div style={{fontSize:12,color:B.muted,marginBottom:16}}>KDV otomatik — yakıt %20, gıda %1, restoran %10, ulaşım %10</div>
+            <div style={{fontSize:12,color:B.muted,marginBottom:16}}>KDV otomatik — yakıt %20, gıda %1, restoran/kafe %10, ulaşım %10</div>
+            {!CLAUDE_API_KEY&&<div style={{fontSize:11,color:B.amber,marginBottom:12,background:"#fff8e8",borderRadius:8,padding:"6px 12px",display:"inline-block"}}>⚠️ AI fiş tarama için CLAUDE_API_KEY girilmeli</div>}
             <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
               <Btn color={B.gold} onClick={()=>fileRef.current?.click()}>📷 Fiş Fotoğrafı (AI okur)</Btn>
               <Btn color={B.navy} outline onClick={()=>setAddExpOpen(true)}>+ Manuel Gir</Btn>
@@ -1393,12 +1404,13 @@ export default function App() {
           </div>}
           {expYear.length>0&&<div style={{background:B.card,border:`1px solid ${B.border}`,borderRadius:12,overflow:"auto"}}>
             <table style={{width:"100%",borderCollapse:"collapse",fontSize:12,minWidth:500}}>
-              <thead><tr style={{background:B.navy,color:"#fff"}}>{["Tarih","Açıklama","Kategori","KDV Dahil","KDV%","İnd. KDV","KDV Hariç",""].map((h,i)=><th key={i} style={{padding:"7px 9px",textAlign:"left",fontSize:9,textTransform:"uppercase",fontWeight:700}}>{h}</th>)}</tr></thead>
+              <thead><tr style={{background:B.navy,color:"#fff"}}>{["Tarih","Tür","Açıklama","Kategori","KDV Dahil","KDV%","İnd. KDV","KDV Hariç",""].map((h,i)=><th key={i} style={{padding:"7px 9px",textAlign:"left",fontSize:9,textTransform:"uppercase",fontWeight:700}}>{h}</th>)}</tr></thead>
               <tbody>
                 {expYear.sort((a,b)=>b.tarih.localeCompare(a.tarih)).map((e,i)=>{
                   const net=e.tutarKdvDahil/(1+e.kdvOrani/100); const kdv=e.tutarKdvDahil-net;
                   return <tr key={e.id} style={{background:i%2===0?"#fff":B.bg}}>
                     <td style={{padding:"7px 9px",color:B.muted,fontSize:11}}>{fmtD(e.tarih)}</td>
+                    <td style={{padding:"7px 9px"}}><span style={{background:e.tip==="adıma fatura"?B.navyLight:B.goldLight,color:e.tip==="adıma fatura"?B.navy:B.amber,borderRadius:20,padding:"2px 7px",fontSize:10,fontWeight:700,whiteSpace:"nowrap"}}>{e.tip==="adıma fatura"?"📄 Fatura":"🧾 Fiş"}</span></td>
                     <td style={{padding:"7px 9px",fontWeight:600}}>{e.aciklama}</td>
                     <td style={{padding:"7px 9px"}}><span style={{background:B.navyLight,color:B.navy,borderRadius:20,padding:"2px 8px",fontSize:10,fontWeight:700}}>{e.kategori}</span></td>
                     <td style={{padding:"7px 9px",fontWeight:700}}>₺{fmtN(e.tutarKdvDahil)}</td>
@@ -1513,13 +1525,13 @@ export default function App() {
           {[["Firma/Müşteri *","firma"],["Fatura Notu","faturaNotu"]].map(([l,k])=>(
             <div key={k} style={{marginBottom:11}}><Lbl c={l}/><input style={INP({width:"100%"})} value={newInv[k]} onChange={e=>setNewInv(p=>({...p,[k]:e.target.value}))}/></div>
           ))}
-          <div style={{marginBottom:11}}><Lbl c="Fatura Tarihi"/><input type="date" style={INP({width:"100%"})} value={newInv.tarih} onChange={e=>setNewInv(p=>({...p,tarih:e.target.value,kdvOrani:kdvRate(e.target.value)}))}/></div>
+          <div style={{marginBottom:11}}><Lbl c="Fatura Tarihi"/><input type="date" style={INP({width:"100%"})} value={newInv.tarih} onChange={e=>setNewInv(p=>({...p,tarih:e.target.value}))}/></div>
           <div style={{display:"flex",gap:10,marginBottom:11}}>
             <div style={{flex:2}}><Lbl c="KDV Hariç Tutar *"/><input type="number" style={INP({width:"100%"})} value={newInv.tutarKdvHaric} onChange={e=>setNewInv(p=>({...p,tutarKdvHaric:e.target.value}))}/></div>
             <div style={{flex:1}}><Lbl c="Para Birimi"/><select style={SEL({width:"100%"})} value={newInv.currency} onChange={e=>setNewInv(p=>({...p,currency:e.target.value}))}>{["TRY","EUR","USD"].map(c=><option key={c}>{c}</option>)}</select></div>
           </div>
           <div style={{display:"flex",gap:10,marginBottom:11}}>
-            <div style={{flex:1}}><Lbl c="KDV %"/><select style={SEL({width:"100%"})} value={newInv.kdvOrani} onChange={e=>setNewInv(p=>({...p,kdvOrani:parseInt(e.target.value)}))}>{[0,1,8,10,18,20].map(r=><option key={r}>{r}</option>)}</select></div>
+            <div style={{flex:1}}><Lbl c="KDV %"/><select style={SEL({width:"100%"})} value={newInv.kdvOrani} onChange={e=>setNewInv(p=>({...p,kdvOrani:parseInt(e.target.value)}))}>{[0,1,8,10,18,20].map(r=><option key={r} value={r}>%{r}{r===0?" (KDV yok/istisna)":""}</option>)}</select></div>
             <div style={{flex:2}}><Lbl c="Hizmet"/><select style={SEL({width:"100%"})} value={newInv.service} onChange={e=>setNewInv(p=>({...p,service:e.target.value}))}>{SERVICES.map(s=><option key={s}>{s}</option>)}</select></div>
           </div>
           {newInv.tutarKdvHaric&&<div style={{background:B.greenLight,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:13,color:B.green,fontWeight:700}}>
@@ -1529,14 +1541,24 @@ export default function App() {
         </Modal>}
 
         {/* Gider Modal */}
-        {addExpOpen&&<Modal onClose={()=>{ setAddExpOpen(false); setNewExp({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20}); }}>
-          <div style={{fontWeight:800,fontSize:16,color:B.navy,marginBottom:4}}>🧾 Gider / Adıma Fatura Ekle {scanningExp&&<span style={{fontSize:12,color:B.gold}}>🤖 AI okuyor...</span>}</div>
+        {addExpOpen&&<Modal onClose={()=>{ setAddExpOpen(false); setNewExp({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20,tip:"fiş"}); }}>
+          <div style={{fontWeight:800,fontSize:16,color:B.navy,marginBottom:4}}>🧾 Gider / Belge Ekle {scanningExp&&<span style={{fontSize:12,color:B.gold}}>🤖 AI okuyor...</span>}</div>
           {scanningExp&&<div style={{background:B.goldLight,borderRadius:8,padding:"8px 12px",marginBottom:10,fontSize:12,color:B.amber,textAlign:"center"}}>🤖 Fiş okunuyor...</div>}
+          {/* Belge Tipi */}
+          <div style={{marginBottom:11}}>
+            <Lbl c="Belge Türü"/>
+            <div style={{display:"flex",gap:6}}>
+              {[["fiş","🧾 Fiş"],["adıma fatura","📄 Adıma Fatura"]].map(([v,l])=>(
+                <button key={v} onClick={()=>setNewExp(p=>({...p,tip:v}))}
+                  style={{background:newExp.tip===v?B.navy:"#fff",color:newExp.tip===v?"#fff":B.muted,border:`1.5px solid ${newExp.tip===v?B.navy:B.border}`,borderRadius:20,padding:"5px 14px",fontSize:12,cursor:"pointer",fontWeight:700,fontFamily:"inherit"}}>{l}</button>
+              ))}
+            </div>
+          </div>
           <div style={{marginBottom:11}}><Lbl c="Tarih"/><input type="date" style={INP({width:"100%"})} value={newExp.tarih} onChange={e=>setNewExp(p=>({...p,tarih:e.target.value}))}/></div>
           <div style={{marginBottom:11}}><Lbl c="Açıklama *"/><input style={INP({width:"100%"})} placeholder="Petroil yakıt, Migros, telefon faturası..." value={newExp.aciklama} onChange={e=>setNewExp(p=>({...p,aciklama:e.target.value}))}/></div>
           <div style={{display:"flex",gap:10,marginBottom:11}}>
             <div style={{flex:2}}><Lbl c="Tutar (KDV dahil) *"/><input type="number" style={INP({width:"100%"})} value={newExp.tutarKdvDahil} onChange={e=>setNewExp(p=>({...p,tutarKdvDahil:e.target.value}))}/></div>
-            <div style={{flex:1}}><Lbl c="KDV %"/><select style={SEL({width:"100%"})} value={newExp.kdvOrani} onChange={e=>setNewExp(p=>({...p,kdvOrani:parseInt(e.target.value)}))}>{[0,1,8,10,18,20].map(r=><option key={r}>{r}</option>)}</select></div>
+            <div style={{flex:1}}><Lbl c="KDV %"/><select style={SEL({width:"100%"})} value={newExp.kdvOrani} onChange={e=>setNewExp(p=>({...p,kdvOrani:parseInt(e.target.value)}))}>{[0,1,8,10,18,20].map(r=><option key={r} value={r}>%{r}{r===0?" (istisna)":""}</option>)}</select></div>
           </div>
           <div style={{marginBottom:11}}><Lbl c="Kategori"/><select style={SEL({width:"100%"})} value={newExp.kategori} onChange={e=>setNewExp(p=>({...p,kategori:e.target.value,kdvOrani:GIDER_KDV[e.target.value]||20}))}>{GIDER_CATS.map(c=><option key={c}>{c}</option>)}</select></div>
           {newExp.tutarKdvDahil&&<div style={{background:B.greenLight,borderRadius:8,padding:"8px 12px",marginBottom:12,fontSize:13,color:B.green,fontWeight:700}}>
@@ -1545,8 +1567,8 @@ export default function App() {
           <div style={{display:"flex",gap:8}}>
             <Btn onClick={addExpense} style={{opacity:scanningExp?.5:1}} disabled={scanningExp}>Kaydet</Btn>
             <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>{ if(e.target.files[0]){ scanReceipt(e.target.files[0]); e.target.value=""; } }}/>
-            <Btn color={B.gold} outline onClick={()=>fileRef.current?.click()}>📷 Fiş Tara</Btn>
-            <Btn outline color={B.muted} onClick={()=>setAddExpOpen(false)}>İptal</Btn>
+            <Btn color={B.gold} outline onClick={()=>fileRef.current?.click()}>📷 Fiş Tara (AI){!CLAUDE_API_KEY&&<span style={{fontSize:10}}> ⚠️</span>}</Btn>
+            <Btn outline color={B.muted} onClick={()=>{ setAddExpOpen(false); setNewExp({tarih:TODAY,aciklama:"",kategori:"Yakıt",tutarKdvDahil:"",kdvOrani:20,tip:"fiş"}); }}>İptal</Btn>
           </div>
         </Modal>}
       </div>}
